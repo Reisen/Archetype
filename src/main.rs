@@ -1,28 +1,18 @@
-use http::uri::Uri;
 use url::Url;
 
+mod crypto;
 mod generators;
 
 fn decode_secrets(secret: &[u8], item: &str) {
-    use hmac::{Hmac, Mac};
-    use sha2::Sha256;
-
-    // Generate a key using the URI as the input.
-    let url = item.parse::<Url>().unwrap();
-    let key = {
-        let mut key = Hmac::<Sha256>::new_varkey(secret).unwrap();
-        key.input(url.host_str().unwrap().as_bytes());
-        key
-    };
-
-    // Extract Bytes
-    let res = key.result().code();
-    let key = res.as_slice();
+    // Enforce Parsing of a URL, and create a secret generator.
+    let uri = item.parse::<Url>().unwrap();
+    let salt = item.as_bytes();
+    let secret_generator = crypto::SecretGenerator::new(secret, salt);
 
     #[rustfmt::skip]
-    match url.scheme() {
-        "gpg" => { generators::generate_gpg_key(url, key, true).ok(); }
-        "key" => { generators::generate_key_material(url, key, true).ok(); }
+    match uri.scheme() {
+        "gpg" => { generators::create_gpg_key(uri, secret_generator, true).ok(); }
+        "key" => { generators::create_key(uri, secret_generator).ok(); }
         _ => {}
     };
 }
@@ -48,17 +38,36 @@ fn generate_master_key(pass: &str, salt: &str) -> Vec<u8> {
     // TODO: Come up with better configuration defaults.
     let config = &Config {
         ad:          &[],
-        hash_length: 32,
-        lanes:       1,
-        mem_cost:    8,
+        hash_length: 64, // Bytes
+        lanes:       8,
+        mem_cost:    1_048_576, // KiB
         secret:      &[],
         thread_mode: ThreadMode::Parallel,
-        time_cost:   1,
+        time_cost:   8,
         variant:     Variant::Argon2id,
         version:     Version::Version13,
     };
 
-    hash_raw(pass.as_bytes(), salt.as_bytes(), config).unwrap()
+    let hash = hash_raw(pass.as_bytes(), salt.as_bytes(), config).unwrap();
+    render_master_emoji(&hash[0 .. 8]);
+    hash
+}
+
+fn render_master_emoji(bytes: &[u8]) {
+    #[rustfmt::skip]
+    let emoji = &[
+        "👻","🤖","👺","🐲",
+        "🍀","🐨","🐸","🦁",
+        "🍄","🌺","🍩","🌽",
+        "🥝","🏀","🚀","💎",
+    ];
+
+    eprint!("Emoji: ");
+    for byte in bytes {
+        eprint!("{}", emoji[(byte & 0xF) as usize]);
+        eprint!("{} ", emoji[((byte >> 4) & 0xF) as usize]);
+    }
+    eprintln!("");
 }
 
 fn main() {
@@ -66,8 +75,8 @@ fn main() {
     let args = std::env::args().collect::<Vec<String>>();
     let pass = args[1].clone();
     let salt = args[2].clone();
-    println!("Pass: {}", pass);
-    println!("Salt: {}", salt);
+    eprintln!("Pass:  {}", pass);
+    eprintln!("Salt:  {}", salt);
 
     assert!(salt.len() >= 8);
     assert!(pass.len() >= 8);
@@ -75,6 +84,9 @@ fn main() {
     // Read Input to Generate
     let inputs = read_input();
     let secret = generate_master_key(&*pass, &*salt);
+
+    // Display Key Emoji
+    render_master_emoji(&secret[0 .. 3]);
 
     // Generate Key Material using Secret and URI
     decode_secrets(&*secret, &*inputs);
