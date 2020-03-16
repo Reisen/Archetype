@@ -26,6 +26,6 @@ pub fn create_key(
 ) -> Result<GeneratedMaterial> {
     let length: usize = get_query(&url, "length")?.parse()?;
     let output_key = gen.get_bytes(length);
-    println!("Out: {}", hex::encode(&output_key));
+    println!("Key:   {}", hex::encode(&output_key));
     Ok(GeneratedMaterial { output_key })
 }

@@ -6,8 +6,10 @@ mod generators;
 fn decode_secrets(secret: &[u8], item: &str) {
     // Enforce Parsing of a URL, and create a secret generator.
     let uri = item.parse::<Url>().unwrap();
-    let salt = item.as_bytes();
+    let salt = &uri[.. url::Position::BeforePath];
     let secret_generator = crypto::SecretGenerator::new(secret, salt);
+
+    eprintln!("Salt:  {}", salt);
 
     #[rustfmt::skip]
     match uri.scheme() {
@@ -50,7 +52,6 @@ fn generate_master_key(pass: &str, salt: &str) -> Vec<u8> {
     };
 
     let hash = hash_raw(pass.as_bytes(), salt.as_bytes(), config).unwrap();
-    render_master_emoji(&hash[0 .. 8]);
     hash
 }
 
@@ -74,21 +75,21 @@ fn render_master_emoji(bytes: &[u8]) {
 fn main() {
     // Parse Key Generation Arguments
     let args = std::env::args().collect::<Vec<String>>();
-    let pass = args[1].clone();
-    let salt = args[2].clone();
-    eprintln!("Pass:  {}", pass);
+    let pass = read_input();
+    let salt = args[1].clone();
+    let line = args[2].clone();
     eprintln!("Salt:  {}", salt);
+    eprintln!("URI:   {}", line);
 
-    assert!(salt.len() >= 8);
     assert!(pass.len() >= 8);
+    assert!(salt.len() >= 8);
 
     // Read Input to Generate
-    let inputs = read_input();
     let secret = generate_master_key(&*pass, &*salt);
 
     // Display Key Emoji
     render_master_emoji(&secret[0 .. 3]);
 
     // Generate Key Material using Secret and URI
-    decode_secrets(&*secret, &*inputs);
+    decode_secrets(&*secret, &*line);
 }

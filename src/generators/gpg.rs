@@ -127,106 +127,114 @@ pub fn create_gpg_key(
 
     // Create Certificate from Packets
     // -------------------------------------------------------------------------
-    let mut certificate = Cert::from_packet_pile(
-        vec![
-            packet_key.clone().into(),
-            packet_uid.into(),
-            packet_sig.into(),
-        ]
-        .into(),
-    )?;
+    let mut packets = vec![
+        packet_key.clone().into(),
+        packet_uid.into(),
+        packet_sig.into(),
+    ];
 
     // With our Certificate, begin generating N Signing/Authentication Subkeys
     // to attach to the certificate. We hash the initial secret key repeatedly
     // to get each successive ed25519 secret key.
     // -------------------------------------------------------------------------
     for _ in 0 .. count {
-        let key = gen.get_bytes(32);
-        let key = key.as_slice();
-        subkeys.push(key.to_vec());
+        {
+            let key = gen.get_bytes(32);
+            let key = key.as_slice();
+            subkeys.push(key.to_vec());
 
-        // Extract Key Bytes
-        let flags = KeyFlags::default()
-            .set_authentication(true)
-            .set_signing(true);
+            // Extract Key Bytes
+            let flags = KeyFlags::default()
+                .set_authentication(true)
+                .set_signing(true);
 
-        // Generate Subkeys
-        let sub_secret = Key4::import_secret_ed25519(key, now)?;
-        let mut sub_keypair = sub_secret.clone().into_keypair()?;
-        let packet_sub = Key::V4(sub_secret);
+            // Generate Subkeys
+            let sub_secret = Key4::import_secret_ed25519(key, now)?;
+            let mut sub_keypair = sub_secret.clone().into_keypair()?;
+            let packet_sub = Key::V4(sub_secret);
 
-        // We need to generate a cross signature. This is a signature that
-        // signs the original certificate primary key, this way we end up
-        // with:
-        //    Primary -> Subkey
-        //    Subkey  -> Primary
-        let packet_crs =
-            signature::Builder::new(SignatureType::PrimaryKeyBinding)
-                .set_hash_algo(HashAlgorithm::SHA512)
-                .set_signature_creation_time(now)?
-                .set_issuer_fingerprint(packet_sub.fingerprint())?
-                .set_issuer(packet_sub.keyid())?
-                .sign_primary_key_binding(
-                    &mut sub_keypair,
-                    &packet_key,
-                    &packet_sub,
-                )?;
+            // We need to generate a cross signature. This is a signature that
+            // signs the original certificate primary key, this way we end up
+            // with:
+            //    Primary -> Subkey
+            //    Subkey  -> Primary
+            let packet_crs =
+                signature::Builder::new(SignatureType::PrimaryKeyBinding)
+                    .set_hash_algo(HashAlgorithm::SHA512)
+                    .set_signature_creation_time(now)?
+                    .set_issuer_fingerprint(packet_sub.fingerprint())?
+                    .set_issuer(packet_sub.keyid())?
+                    .sign_primary_key_binding(
+                        &mut sub_keypair,
+                        &packet_key,
+                        &packet_sub,
+                    )?;
 
-        // Generate Signature for Subkey
-        let packet_sig = signature::Builder::new(SignatureType::SubkeyBinding)
-            .set_features(&Features::sequoia())?
-            .set_hash_algo(HashAlgorithm::SHA512)
-            .set_issuer_fingerprint(packet_key.fingerprint())?
-            .set_issuer(packet_key.keyid())?
-            .set_preferred_hash_algorithms(hash_preferences.clone())?
-            .set_embedded_signature(packet_crs)?
-            .set_key_flags(&flags)?
-            .set_signature_creation_time(now)?
-            .sign_subkey_binding(&mut keypair, &packet_key, &packet_sub)?;
+            // Generate Signature for Subkey
+            let packet_sig =
+                signature::Builder::new(SignatureType::SubkeyBinding)
+                    .set_features(&Features::sequoia())?
+                    .set_hash_algo(HashAlgorithm::SHA512)
+                    .set_issuer_fingerprint(packet_key.fingerprint())?
+                    .set_issuer(packet_key.keyid())?
+                    .set_preferred_hash_algorithms(hash_preferences.clone())?
+                    .set_embedded_signature(packet_crs)?
+                    .set_key_flags(&flags)?
+                    .set_signature_creation_time(now)?
+                    .sign_subkey_binding(
+                        &mut keypair,
+                        &packet_key,
+                        &packet_sub,
+                    )?;
 
-        certificate = certificate
-            .merge_packets(vec![packet_sub.into(), packet_sig.into()])?;
-    }
+            packets.extend(vec![packet_sub.into(), packet_sig.into()]);
+        }
 
-    for _ in 0 .. count {
-        let mut key = gen.get_bytes(32);
-        let key = key.as_mut_slice();
-        subkeys.push(key.to_vec());
+        {
+            let mut key = gen.get_bytes(32);
+            let key = key.as_mut_slice();
+            subkeys.push(key.to_vec());
 
-        // Perform Curve25519 Manipulations
-        key[0] &= 248;
-        key[31] &= 63;
-        key[31] |= 64;
+            // Perform Curve25519 Manipulations
+            key[0] &= 248;
+            key[31] &= 63;
+            key[31] |= 64;
 
-        let flags = KeyFlags::default()
-            .set_storage_encryption(true)
-            .set_transport_encryption(true);
+            let flags = KeyFlags::default()
+                .set_storage_encryption(true)
+                .set_transport_encryption(true);
 
-        // Generate Subkeys
-        let sub_secret = Key4::import_secret_cv25519(
-            key,
-            HashAlgorithm::SHA512,
-            SymmetricAlgorithm::AES256,
-            now,
-        )?;
-        let packet_sub = Key::V4(sub_secret);
+            // Generate Subkeys
+            let sub_secret = Key4::import_secret_cv25519(
+                key,
+                HashAlgorithm::SHA512,
+                SymmetricAlgorithm::AES256,
+                now,
+            )?;
+            let packet_sub = Key::V4(sub_secret);
 
-        // Generate Signature for Subkey
-        let packet_sig = signature::Builder::new(SignatureType::SubkeyBinding)
-            .set_features(&Features::sequoia())?
-            .set_hash_algo(HashAlgorithm::SHA512)
-            .set_issuer_fingerprint(packet_key.fingerprint())?
-            .set_issuer(packet_key.keyid())?
-            .set_preferred_hash_algorithms(hash_preferences.clone())?
-            .set_key_flags(&flags)?
-            .set_signature_creation_time(now)?
-            .sign_subkey_binding(&mut keypair, &packet_key, &packet_sub)?;
+            // Generate Signature for Subkey
+            let packet_sig =
+                signature::Builder::new(SignatureType::SubkeyBinding)
+                    .set_features(&Features::sequoia())?
+                    .set_hash_algo(HashAlgorithm::SHA512)
+                    .set_issuer_fingerprint(packet_key.fingerprint())?
+                    .set_issuer(packet_key.keyid())?
+                    .set_preferred_hash_algorithms(hash_preferences.clone())?
+                    .set_key_flags(&flags)?
+                    .set_signature_creation_time(now)?
+                    .sign_subkey_binding(
+                        &mut keypair,
+                        &packet_key,
+                        &packet_sub,
+                    )?;
 
-        certificate = certificate
-            .merge_packets(vec![packet_sub.into(), packet_sig.into()])?;
+            packets.extend(vec![packet_sub.into(), packet_sig.into()]);
+        }
     }
 
     if print {
+        let certificate = Cert::from_packet_pile(packets.into())?;
         let _ = certificate.as_tsk().serialize(&mut stdout());
     }
 

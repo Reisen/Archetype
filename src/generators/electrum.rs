@@ -347,7 +347,7 @@ pub fn create_seed(url: Url, mut gen: SecretGenerator) -> Result<()> {
         hmac.input(line.as_bytes());
         let code = hex::encode(hmac.result().code());
         if code.starts_with(seed_prefix) {
-            println!("Seed: {}", line);
+            println!("Seed:  {}", line);
             break;
         }
     }
