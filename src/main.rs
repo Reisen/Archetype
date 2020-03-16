@@ -11,8 +11,9 @@ fn decode_secrets(secret: &[u8], item: &str) {
 
     #[rustfmt::skip]
     match uri.scheme() {
-        "gpg" => { generators::create_gpg_key(uri, secret_generator, true).ok(); }
-        "key" => { generators::create_key(uri, secret_generator).ok(); }
+        "gpg"      => { generators::create_gpg_key(uri, secret_generator, true).ok(); }
+        "key"      => { generators::create_key(uri, secret_generator).ok(); }
+        "electrum" => { generators::create_seed(uri, secret_generator).ok(); }
         _ => {}
     };
 }

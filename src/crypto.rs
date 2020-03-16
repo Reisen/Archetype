@@ -5,7 +5,8 @@ use sha2::Sha256;
 
 /// Will continuously generate blocks of random bytes from an initial secret.
 pub struct SecretGenerator {
-    secret: Hmac<Sha256>,
+    secret:   Hmac<Sha256>,
+    consumed: usize,
 }
 
 impl SecretGenerator {
@@ -16,9 +17,11 @@ impl SecretGenerator {
     {
         use hmac::Mac;
         let mut hmac = Hmac::<Sha256>::new(secret.as_ref().into());
-        println!("Initial: {}", hex::encode(&hmac.clone().result().code()));
         hmac.input(salt.as_ref());
-        Self { secret: hmac }
+        Self {
+            secret:   hmac,
+            consumed: 0,
+        }
     }
 
     /// Get N bytes for some named secret.
@@ -34,6 +37,7 @@ impl SecretGenerator {
             blocks -= 1;
         }
 
+        self.consumed += output.len();
         output.truncate(length);
         assert_eq!(output.len(), length);
         output
@@ -62,5 +66,7 @@ mod testing {
 
         let output = secret_generator.get_bytes(65);
         assert_eq!(output.len(), 65);
+
+        assert_eq!(secret_generator.consumed, 224);
     }
 }
