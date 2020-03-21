@@ -1,22 +1,23 @@
 use url::Url;
 
 mod crypto;
+mod error;
 mod generators;
+mod util;
 
 fn decode_secrets(secret: &[u8], item: &str) {
     // Enforce Parsing of a URL, and create a secret generator.
     let uri = item.parse::<Url>().unwrap();
     let salt = &uri[.. url::Position::BeforePath];
-    let secret_generator = crypto::SecretGenerator::new(secret, salt);
-
+    let secret_generator = crypto::Entropy::new(secret, salt);
     eprintln!("Salt:  {}", salt);
 
     #[rustfmt::skip]
     match uri.scheme() {
-        "gpg"      => { generators::create_gpg_key(uri, secret_generator, true).ok(); }
-        "key"      => { generators::create_key(uri, secret_generator).ok(); }
-        "electrum" => { generators::create_seed(uri, secret_generator).ok(); }
-        _ => {}
+        "gpg"      => { generators::gpg_key(uri, secret_generator, true).ok(); }
+        "key"      => { generators::key(uri, secret_generator).ok(); }
+        "electrum" => { generators::seed(uri, secret_generator).ok(); }
+        _ =>          { eprintln!("Error: Unknown URI"); }
     };
 }
 
@@ -51,8 +52,7 @@ fn generate_master_key(pass: &str, salt: &str) -> Vec<u8> {
         version:     Version::Version13,
     };
 
-    let hash = hash_raw(pass.as_bytes(), salt.as_bytes(), config).unwrap();
-    hash
+    hash_raw(pass.as_bytes(), salt.as_bytes(), config).unwrap()
 }
 
 fn render_master_emoji(bytes: &[u8]) {

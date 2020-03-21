@@ -1,23 +1,10 @@
-use crate::crypto::SecretGenerator;
-use std::error::Error;
+use crate::crypto::Entropy;
+use crate::error::Result;
+use crate::util;
 use url::Url;
 
-type Result<T> = std::result::Result<T, Box<dyn Error>>;
-
 #[derive(Debug)]
-pub struct GeneratedMaterial {
-    pub input_key: Vec<u8>,
-    pub subkeys:   Vec<Vec<u8>>,
-}
-
-/// Crappy helper to pull arguments out of a Url.
-fn get_query(url: &Url, arg: &str) -> Result<String> {
-    url.query_pairs()
-        .find(|x| (*x).0 == arg)
-        .map(|x| x.1)
-        .ok_or_else(|| format!("Could not find argument: {}", arg).into())
-        .map(|s| s.to_string())
-}
+pub struct GPGKey(Vec<u8>, Vec<Vec<u8>>);
 
 /// Generate a GPG key containing ed25519 subkeys.
 ///
@@ -32,11 +19,7 @@ fn get_query(url: &Url, arg: &str) -> Result<String> {
 ///
 /// 1) Packet ordering is grouped with critical below.
 /// 2) Subkeys do not generate with expirations, they can be added.
-pub fn create_gpg_key(
-    url: Url,
-    mut gen: SecretGenerator,
-    print: bool,
-) -> Result<GeneratedMaterial> {
+pub fn gpg_key(url: Url, mut source: Entropy, print: bool) -> Result<GPGKey> {
     // Pull in all Sequoia Dependencies
     use sequoia_openpgp::cert::Cert;
     use sequoia_openpgp::packet::key::Key4;
@@ -67,9 +50,9 @@ pub fn create_gpg_key(
 
     // Do extraction of arguments for generation
     // -------------------------------------------------------------------------
-    let name: &str = &*get_query(&url, "name")?;
-    let count: u32 = get_query(&url, "count")?.parse()?;
-    let year: i32 = get_query(&url, "year")?.parse()?;
+    let name: &str = &*util::option(&url, "name")?;
+    let count: u32 = util::option(&url, "count")?.parse()?;
+    let year: i32 = util::option(&url, "year")?.parse()?;
 
     // Generate Secret Key Material
     //
@@ -79,7 +62,7 @@ pub fn create_gpg_key(
     //
     // TODO: Add test for this.
     // -------------------------------------------------------------------------
-    let key = gen.get_bytes(32);
+    let key = source.get_bytes(32);
     let now: time::SystemTime = Utc.ymd(year, 1, 1).and_hms(0, 0, 0).into();
     let secret = Key4::import_secret_ed25519(&key, now)?;
     let mut keypair = secret.clone().into_keypair()?;
@@ -139,7 +122,7 @@ pub fn create_gpg_key(
     // -------------------------------------------------------------------------
     for _ in 0 .. count {
         {
-            let key = gen.get_bytes(32);
+            let key = source.get_bytes(32);
             let key = key.as_slice();
             subkeys.push(key.to_vec());
 
@@ -191,7 +174,7 @@ pub fn create_gpg_key(
         }
 
         {
-            let mut key = gen.get_bytes(32);
+            let mut key = source.get_bytes(32);
             let key = key.as_mut_slice();
             subkeys.push(key.to_vec());
 
@@ -238,10 +221,7 @@ pub fn create_gpg_key(
         let _ = certificate.as_tsk().serialize(&mut stdout());
     }
 
-    Ok(GeneratedMaterial {
-        input_key: key.to_vec(),
-        subkeys,
-    })
+    Ok(GPGKey(key.to_vec(), subkeys))
 }
 
 #[cfg(test)]
@@ -284,13 +264,13 @@ mod testing {
         // Ensure that we get the expected key material for our Argon2id inputs.
         assert_eq!(encode(&key), m);
 
-        let gen = SecretGenerator::new(
+        let gen = Entropy::new(
             &key,
             "gpg://test@test.com?name=Test&count=2&year=2020",
         );
 
         // Generate a GPG Key
-        let material = create_gpg_key(
+        let material = gpg_key(
             "gpg://test@test.com?name=Test&count=2&year=2020"
                 .parse()
                 .unwrap(),
@@ -300,11 +280,11 @@ mod testing {
         .unwrap();
 
         // Check Generated Keys are what we expect.
-        assert_eq!(material.subkeys.len(), 4);
-        assert_eq!(encode(material.input_key), a);
-        assert_eq!(encode(material.subkeys.get(0).unwrap()), b);
-        assert_eq!(encode(material.subkeys.get(1).unwrap()), c);
-        assert_eq!(encode(material.subkeys.get(2).unwrap()), e);
-        assert_eq!(encode(material.subkeys.get(3).unwrap()), f);
+        assert_eq!(encode(material.0), a);
+        assert_eq!(material.1.len(), 4);
+        assert_eq!(encode(material.1.get(0).unwrap()), b);
+        assert_eq!(encode(material.1.get(1).unwrap()), c);
+        assert_eq!(encode(material.1.get(2).unwrap()), e);
+        assert_eq!(encode(material.1.get(3).unwrap()), f);
     }
 }

@@ -3,11 +3,10 @@
 //! - Generate Electrum SegWit 2.0 Seeds
 //! - Generate Electrum Legacy 2.0 Seeds
 
-use crate::crypto::SecretGenerator;
-use std::error::Error;
+use crate::crypto::Entropy;
+use crate::error::Result;
+use crate::util;
 use url::Url;
-
-type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 const WORDLIST: &[&'static str] = &[
     "abandon", "ability", "able", "about", "above", "absent", "absorb",
@@ -282,24 +281,16 @@ const WORDLIST: &[&'static str] = &[
     "zebra", "zero", "zone", "zoo",
 ];
 
-fn get_query(url: &Url, arg: &str) -> Result<String> {
-    url.query_pairs()
-        .find(|x| (*x).0 == arg)
-        .map(|x| x.1)
-        .ok_or_else(|| format!("Could not find argument: {}", arg).into())
-        .map(|s| s.to_string())
-}
-
 /// Electrum seeds are a little weird. But essentially the desire here is to
 /// generate a number that when hashed gives us a valid wallet type prefix.
 /// We'll adapt the code directly from Electrum to do this, making it
-/// deterministic from our SecretGenerator.
-pub fn create_seed(url: Url, mut gen: SecretGenerator) -> Result<()> {
+/// deterministic from our Entropy.
+pub fn seed(url: Url, mut source: Entropy) -> Result<()> {
     use hmac::{Hmac, Mac};
     use sha2::Sha512;
 
     #[rustfmt::skip]
-    let seed_prefix = match &*get_query(&url, "prefix")? {
+    let seed_prefix = match &*util::option(&url, "prefix")? {
         "standard"   => "01",
         "segwit"     => "100",
         "2fa"        => "101",
@@ -317,7 +308,7 @@ pub fn create_seed(url: Url, mut gen: SecretGenerator) -> Result<()> {
     // 11  : bits of entropy per seed word.
     // 132 : Gives us 33 bytes.
     loop {
-        let bytes = gen.get_bytes(16);
+        let bytes = source.get_bytes(16);
         let bytes = &bytes[0 .. 16];
         let mut slice = [0u8; 16];
         slice.copy_from_slice(bytes);
@@ -363,7 +354,6 @@ mod testing {
     fn test_seed_generation() {
         // Generate a known Argon2id master key
         use argon2::{hash_raw, Config, ThreadMode, Variant, Version};
-        use hex::encode;
 
         // TODO: Come up with better configuration defaults.
         let config = &Config {
@@ -382,13 +372,11 @@ mod testing {
             hash_raw("password".as_bytes(), "password".as_bytes(), config)
                 .unwrap();
 
-        let gen = SecretGenerator::new(
-            &key,
-            "electrum://reisen@morphism.org?prefix=segwit",
-        );
+        let gen =
+            Entropy::new(&key, "electrum://reisen@morphism.org?prefix=segwit");
 
         // Generate a GPG Key
-        let material = create_seed(
+        seed(
             "electrum://reisen@morphism.org?prefix=segwit"
                 .parse()
                 .unwrap(),
