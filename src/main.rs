@@ -8,11 +8,7 @@ mod util;
 fn decode_secrets(secret: &[u8], item: &str) {
     // Enforce Parsing of a URL, and create a secret generator.
     let uri = item.parse::<Url>().unwrap();
-    let salt = &uri[.. if uri.path() == "/" {
-        url::Position::AfterHost
-    } else {
-        url::Position::AfterPath
-    }];
+    let salt = util::normalize_url_salt(&uri);
     let secret_generator = crypto::Entropy::new(secret, salt);
     eprintln!("Salt:  {}", salt);
 
