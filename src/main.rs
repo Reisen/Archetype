@@ -8,16 +8,21 @@ mod util;
 fn decode_secrets(secret: &[u8], item: &str) {
     // Enforce Parsing of a URL, and create a secret generator.
     let uri = item.parse::<Url>().unwrap();
-    let salt = &uri[.. url::Position::BeforePath];
+    let salt = &uri[.. if uri.path() == "/" {
+        url::Position::AfterHost
+    } else {
+        url::Position::AfterPath
+    }];
     let secret_generator = crypto::Entropy::new(secret, salt);
     eprintln!("Salt:  {}", salt);
 
     #[rustfmt::skip]
     match uri.scheme() {
-        "gpg"      => { generators::gpg_key(uri, secret_generator, true).ok(); }
-        "key"      => { generators::key(uri, secret_generator).ok(); }
-        "electrum" => { generators::seed(uri, secret_generator).ok(); }
-        _ =>          { eprintln!("Error: Unknown URI"); }
+        "gpg"       => { generators::gpg_key(uri, secret_generator, true).ok(); }
+        "key"       => { generators::key(uri, secret_generator).ok(); }
+        "electrum"  => { generators::seed(uri, secret_generator).ok(); }
+        "wireguard" => { generators::wireguard(uri, secret_generator).ok(); }
+        _ =>           { eprintln!("Error: Unknown URI"); }
     };
 }
 
